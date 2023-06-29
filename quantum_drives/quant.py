@@ -170,7 +170,7 @@ def create_fig(
     ]
     print(len(LABELS))
 
-    PAD = (X_MAX - X_MIN) * 0.03
+    PAD = (X_MAX - X_MIN) * 0.05
 
     # Horizontal lines
     ax.hlines(y=range(0, int(MAX_Y), 60), xmin=X_MIN, xmax=X_MAX, color=GREY91, lw=0.6)
@@ -186,7 +186,7 @@ def create_fig(
 
         # Add line based on three points
         ax.plot(
-            [X_MAX, X_MAX + PAD / 3 * 2, X_MAX + PAD],
+            [X_MAX, X_MAX + PAD / 4 * 3, X_MAX + PAD],
             [y_end, y_text, y_text],
             alpha=0.5,
             ls="dashed",
