@@ -36,8 +36,8 @@ BEST_IN_SHOW = ["xl1", "voyage", "vk00", "ts2", "atlas", "spectre"]
 with open("qdrives.json") as f:
     qdrives = json.load(f)
 
-STEP = 100_000_000
-X_MIN = STEP
+STEP = 10_000_000
+X_MIN = 0
 X_MAX = 70_000_000_000
 
 COLORS = [
@@ -79,26 +79,25 @@ def calc_d_c(v_max, a_1, a_2, d_tot):
     return d_tot - (4 * v_max**2 * (2 * a_1 + a_2)) / (3 * (a_1 + a_2) ** 2)
 
 
-def calc_t_tot(v_max, a_1, a_2, d_tot):
+def calc_t_tot(v_max, a_1, a_2, d_tot, k):
     if calc_d_c(v_max, a_1, a_2, d_tot) < 0:
         z = calc_z(v_max, a_1, a_2, d_tot)
         if z > 1:
             return ((4 * a_1 * v_max) / (a_2**2 - a_1**2)) * (
                 2 * cosh(1 / 3 * log(z - sqrt(z**2 - 1))) - 1
-            )
+            ) + k
         acos_arg = (3 * (a_2 - a_1) ** 2 * (a_1 + a_2) ** 2 * d_tot) / (
             8 * a_1**3 * v_max**2
         ) - 1
-        return (
-            (4 * a_1 * v_max)
-            / (a_2**2 - a_1**2)
-            * (2 * cos((1 / 3) * acos(acos_arg)) - 1)
-        )
+        return (4 * a_1 * v_max) / (a_2**2 - a_1**2) * (
+            2 * cos((1 / 3) * acos(acos_arg)) - 1
+        ) + k
     else:
         return (
             (4 * v_max) / (a_1 + a_2)
             + d_tot / v_max
             - (4 * v_max * (2 * a_1 + a_2)) / (3 * (a_1 + a_2) ** 2)
+            + k
         )
 
 
@@ -112,7 +111,7 @@ def create_fig(
     file_name,
     tank_sizes=[],
     show_size=False,
-    subtitle='Travel time (in seconds) for any realistic distance in Stanton (in meters) given each quantum drive in Star Citizen (Remeber: Lower time is better)\nData has been extracted directly from the 3.19.1 game files via "scdatatools" (https://gitlab.com/scmodding/frameworks/scdatatools).\nCalculations are based on the paper "A study on travel time and the underlying physical model of Quantum Drives in Star Citizen" by @Erec (https://gitlab.com/Erecco/a-study-on-quantum-travel-time).',
+    subtitle='Travel time (including spool up time) for any realistic distance in Stanton given each quantum drive (Remeber: Lower time is better)\nData has been extracted directly from the 3.19.1 game files via "scdatatools" (https://gitlab.com/scmodding/frameworks/scdatatools).\nCalculations are based on the paper "A study on travel time and the underlying physical model of Quantum Drives in Star Citizen" by @Erec (https://gitlab.com/Erecco/a-study-on-quantum-travel-time).',
 ):
     # Initialize layout ----------------------------------------------
     fig, ax = plt.subplots(figsize=(22, 11))
@@ -130,6 +129,7 @@ def create_fig(
             sc_key(q, "SCItemQuantumDriveParams")["params"]["stageOneAccelRate"],
             sc_key(q, "SCItemQuantumDriveParams")["params"]["stageTwoAccelRate"],
             x[-1],
+            sc_key(q, "SCItemQuantumDriveParams")["params"]["spoolUpTime"],
         ),
     )
     LABELS = sorted(
@@ -154,6 +154,7 @@ def create_fig(
                         "stageTwoAccelRate"
                     ],
                     x[-1],
+                    sc_key(q, "SCItemQuantumDriveParams")["params"]["spoolUpTime"],
                 ),
             )
             for q in qdrives
@@ -174,6 +175,14 @@ def create_fig(
 
     # Horizontal lines
     ax.hlines(y=range(0, int(MAX_Y), 60), xmin=X_MIN, xmax=X_MAX, color=GREY91, lw=0.6)
+    ax.hlines(
+        y=[i for i in range(0, int(MAX_Y), 30) if i % 60],
+        xmin=X_MIN,
+        xmax=X_MAX,
+        color=GREY91,
+        lw=0.6,
+        linestyles="dashed",
+    )
 
     # Vertical lines used as scale reference
     # for h in range(X_MIN, X_MAX, 10_000_000_000):
@@ -229,6 +238,7 @@ def create_fig(
                 params["stageOneAccelRate"],
                 params["stageTwoAccelRate"],
                 d_tot,
+                params["spoolUpTime"],
             )
             for d_tot in x
         ]
@@ -246,6 +256,7 @@ def create_fig(
                 params["stageOneAccelRate"],
                 params["stageTwoAccelRate"],
                 tank_x,
+                params["spoolUpTime"],
             )
             plt.text(
                 tank_x,
@@ -278,6 +289,7 @@ def create_fig(
         ticker.FuncFormatter(lambda x, _: f"{x//60:2.0f}:{x%60:02.0f}")
     )
     plt.yticks(range(0, int(MAX_Y), 60))
+    plt.yticks(range(0, int(MAX_Y), 30), minor=True)
 
     plt.suptitle(
         figure_title,
@@ -315,7 +327,7 @@ create_fig(
         (3000.0, "Cutter"),
         (10000.0, "Hull A"),
     ],
-    subtitle='Travel time (in seconds) for any realistic distance in Stanton (in meters) given each quantum drive in Star Citizen (Remeber: Lower time is better)\nNumbers has been placed at the point when each size 1 quantum fuel tank runs out of fuel, i.e. that tanks/ships maximum range with the specific quantum drive (see legend)\nData has been extracted directly from the 3.19.1 game files via "scdatatools" (https://gitlab.com/scmodding/frameworks/scdatatools).\nCalculations are based on the paper "A study on travel time and the underlying physical model of Quantum Drives in Star Citizen" by @Erec (https://gitlab.com/Erecco/a-study-on-quantum-travel-time).',
+    subtitle='Travel time (including spool up time) for any realistic distance in Stanton given each quantum drive (Remeber: Lower time is better)\nNumbers has been placed at the point when each size 1 quantum fuel tank runs out of fuel, i.e. that tanks/ships maximum range with the specific quantum drive (see legend)\nData has been extracted directly from the 3.19.1 game files via "scdatatools" (https://gitlab.com/scmodding/frameworks/scdatatools).\nCalculations are based on the paper "A study on travel time and the underlying physical model of Quantum Drives in Star Citizen" by @Erec (https://gitlab.com/Erecco/a-study-on-quantum-travel-time).',
 )
 create_fig(
     [
