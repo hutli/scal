@@ -4,8 +4,9 @@ from datetime import timedelta
 from math import acos, cos, cosh, log, sqrt
 
 import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
 import numpy
+from matplotlib import ticker
+from matplotlib.patches import FancyBboxPatch
 
 # Shades of gray
 GREY10 = "#1a1a1a"
@@ -30,14 +31,14 @@ DISTANCES = [
     ),  # For refence and fun - Stanton is really small 😅
 ]
 
-BEST_IN_SHOW = ["xl-1", "voyage", "vk-00", "ts-2", "atlas"]
+BEST_IN_SHOW = ["xl1", "voyage", "vk00", "ts2", "atlas", "spectre"]
 
 with open("qdrives.json") as f:
     qdrives = json.load(f)
 
 STEP = 100_000_000
 X_MIN = STEP
-X_MAX = 65_000_000_000
+X_MAX = 70_000_000_000
 
 COLORS = [
     "#e6194b",
@@ -101,7 +102,18 @@ def calc_t_tot(v_max, a_1, a_2, d_tot):
         )
 
 
-def create_fig(qdrives, figure_title, file_name, show_size=False):
+def sc_key(obj, key, second_key="Components"):
+    return next(c for c in obj[second_key] if key in c.keys())[key]
+
+
+def create_fig(
+    qdrives,
+    figure_title,
+    file_name,
+    tank_sizes=[],
+    show_size=False,
+    subtitle='Travel time (in seconds) for any realistic distance in Stanton (in meters) given each quantum drive in Star Citizen (Remeber: Lower time is better)\nData has been extracted directly from the 3.19.1 game files via "scdatatools" (https://gitlab.com/scmodding/frameworks/scdatatools).\nCalculations are based on the paper "A study on travel time and the underlying physical model of Quantum Drives in Star Citizen" by @Erec (https://gitlab.com/Erecco/a-study-on-quantum-travel-time).',
+):
     # Initialize layout ----------------------------------------------
     fig, ax = plt.subplots(figsize=(22, 11))
 
@@ -114,20 +126,33 @@ def create_fig(qdrives, figure_title, file_name, show_size=False):
     qdrives = sorted(
         qdrives,
         key=lambda q: calc_t_tot(
-            q["data"]["qdrive"]["params"]["driveSpeed"],
-            q["data"]["qdrive"]["params"]["stageOneAccelRate"],
-            q["data"]["qdrive"]["params"]["stageTwoAccelRate"],
+            sc_key(q, "SCItemQuantumDriveParams")["params"]["driveSpeed"],
+            sc_key(q, "SCItemQuantumDriveParams")["params"]["stageOneAccelRate"],
+            sc_key(q, "SCItemQuantumDriveParams")["params"]["stageTwoAccelRate"],
             x[-1],
         ),
     )
     LABELS = sorted(
         [
             (
-                q["data"]["name"] + (f'({q["data"]["size"]})' if show_size else ""),
+                sc_key(q, "SAttachableComponentParams")["AttachDef"]["Localization"][
+                    "Name"
+                ]
+                .replace("_SCItem", "")
+                .rsplit("_", 1)[-1]
+                + (
+                    f'({sc_key(q,"SAttachableComponentParams")["AttachDef"]["Size"]})'
+                    if show_size
+                    else ""
+                ),
                 calc_t_tot(
-                    q["data"]["qdrive"]["params"]["driveSpeed"],
-                    q["data"]["qdrive"]["params"]["stageOneAccelRate"],
-                    q["data"]["qdrive"]["params"]["stageTwoAccelRate"],
+                    sc_key(q, "SCItemQuantumDriveParams")["params"]["driveSpeed"],
+                    sc_key(q, "SCItemQuantumDriveParams")["params"][
+                        "stageOneAccelRate"
+                    ],
+                    sc_key(q, "SCItemQuantumDriveParams")["params"][
+                        "stageTwoAccelRate"
+                    ],
                     x[-1],
                 ),
             )
@@ -148,7 +173,7 @@ def create_fig(qdrives, figure_title, file_name, show_size=False):
     PAD = (X_MAX - X_MIN) * 0.03
 
     # Horizontal lines
-    ax.hlines(y=range(0, int(MAX_Y), 100), xmin=X_MIN, xmax=X_MAX, color=GREY91, lw=0.6)
+    ax.hlines(y=range(0, int(MAX_Y), 60), xmin=X_MIN, xmax=X_MAX, color=GREY91, lw=0.6)
 
     # Vertical lines used as scale reference
     # for h in range(X_MIN, X_MAX, 10_000_000_000):
@@ -196,7 +221,7 @@ def create_fig(qdrives, figure_title, file_name, show_size=False):
         )
 
     for i, qdrive in enumerate(qdrives):
-        params = qdrive["data"]["qdrive"]["params"]
+        params = sc_key(qdrive, "SCItemQuantumDriveParams")["params"]
 
         y = [
             calc_t_tot(
@@ -210,17 +235,56 @@ def create_fig(qdrives, figure_title, file_name, show_size=False):
 
         ax.plot(x, y, color=COLORS[i])
 
+        fuel_requirement = sc_key(qdrive, "SCItemQuantumDriveParams")[
+            "quantumFuelRequirement"
+        ]
+        for ii, (size, _) in enumerate(tank_sizes):
+            max_range = size / fuel_requirement * 1_000_000
+            tank_x = min(X_MAX, max_range)
+            tank_y = calc_t_tot(
+                params["driveSpeed"],
+                params["stageOneAccelRate"],
+                params["stageTwoAccelRate"],
+                tank_x,
+            )
+            plt.text(
+                tank_x,
+                tank_y,
+                str(ii),
+                color=COLORS[i],
+                backgroundcolor=GREY98,
+                fontsize=9,
+                multialignment="center",
+                verticalalignment="center",
+                bbox=dict(facecolor=GREY98, edgecolor=GREY98, pad=0.0),
+            )
+            if max_range > X_MAX:
+                break
+
+        if tank_sizes:
+            ax.legend(
+                [
+                    f"{ii}: {size} ({legend_text})"
+                    for ii, (size, legend_text) in enumerate(tank_sizes)
+                ],
+                # handletextpad=-2.0,
+                handlelength=0,
+            )
+
     plt.ticklabel_format(style="plain")  # to prevent scientific notation.
 
     ax.xaxis.set_major_formatter(ticker.StrMethodFormatter("{x:,.0f}m"))
-    ax.yaxis.set_major_formatter(ticker.StrMethodFormatter("{x:,.0f}s"))
+    ax.yaxis.set_major_formatter(
+        ticker.FuncFormatter(lambda x, _: f"{x//60:2.0f}:{x%60:02.0f}")
+    )
+    plt.yticks(range(0, int(MAX_Y), 60))
 
     plt.suptitle(
         figure_title,
         fontsize=24,
     )
     plt.title(
-        'Travel time (in seconds) for any realistic distance in Stanton (in meters) given each quantum drive in Star Citizen.\nRemeber: Lower time is better!\nData has been extracted directly from the 3.19.1 game files.\nCalculations are based on the paper "A study on travel time and the underlying physical model of Quantum Drives in Star Citizen" by @Erec (https://gitlab.com/Erecco/a-study-on-quantum-travel-time).',
+        subtitle,
         fontsize=12,
     )
 
@@ -229,17 +293,45 @@ def create_fig(qdrives, figure_title, file_name, show_size=False):
 
 
 create_fig(
-    [q for q in qdrives if q["data"]["size"] == 1],
+    [
+        q
+        for q in qdrives
+        if sc_key(q, "SAttachableComponentParams")["AttachDef"]["Size"] == 1
+    ],
     f"Size 1 quantum drives",
     "results/res1",
+    tank_sizes=[
+        (583.3300170898438, "Most S1 ships"),
+        (625.0, "85X"),
+        (645.0, "All Pisces"),
+        (680.0, "300i"),
+        (700.0, "Aurora LX, 100i, Mustang Beta"),
+        (770.75, "Nomad"),
+        (800.0, "Scorpius Antares"),
+        (830.0, "315p"),
+        (950.0, "Terrapin"),
+        (1000.0, "Mantis"),
+        (2750.0, "Defender"),
+        (3000.0, "Cutter"),
+        (10000.0, "Hull A"),
+    ],
+    subtitle='Travel time (in seconds) for any realistic distance in Stanton (in meters) given each quantum drive in Star Citizen (Remeber: Lower time is better)\nNumbers has been placed at the point when each size 1 quantum fuel tank runs out of fuel, i.e. that tanks/ships maximum range with the specific quantum drive (see legend)\nData has been extracted directly from the 3.19.1 game files via "scdatatools" (https://gitlab.com/scmodding/frameworks/scdatatools).\nCalculations are based on the paper "A study on travel time and the underlying physical model of Quantum Drives in Star Citizen" by @Erec (https://gitlab.com/Erecco/a-study-on-quantum-travel-time).',
 )
 create_fig(
-    [q for q in qdrives if q["data"]["size"] == 2],
+    [
+        q
+        for q in qdrives
+        if sc_key(q, "SAttachableComponentParams")["AttachDef"]["Size"] == 2
+    ],
     f"Size 2 quantum drives",
     "results/res2",
 )
 create_fig(
-    [q for q in qdrives if q["data"]["size"] == 3],
+    [
+        q
+        for q in qdrives
+        if sc_key(q, "SAttachableComponentParams")["AttachDef"]["Size"] == 3
+    ],
     f"Size 3 quantum drives",
     "results/res3",
 )
@@ -247,7 +339,19 @@ create_fig(
     [
         q
         for q in qdrives
-        if any([n for n in BEST_IN_SHOW if q["data"]["name"].lower() in n.lower()])
+        if any(
+            [
+                n
+                for n in BEST_IN_SHOW
+                if sc_key(q, "SAttachableComponentParams")["AttachDef"]["Localization"][
+                    "Name"
+                ]
+                .replace("_SCItem", "")
+                .rsplit("_", 1)[-1]
+                .lower()
+                in n.lower()
+            ]
+        )
     ],
     f"Common quantum drives",
     "results/resb",
