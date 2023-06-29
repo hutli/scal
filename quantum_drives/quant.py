@@ -310,7 +310,7 @@ create_fig(
         for q in qdrives
         if sc_key(q, "SAttachableComponentParams")["AttachDef"]["Size"] == 1
     ],
-    f"Size 1 quantum drives",
+    f"Size 1 quantum drives - including maximum ranges",
     "results/res1",
     tank_sizes=[
         (583.3300170898438, "Most S1 ships"),
@@ -328,6 +328,15 @@ create_fig(
         (10000.0, "Hull A"),
     ],
     subtitle='Travel time (including spool up time) for any realistic distance in Stanton given each quantum drive (Remeber: Lower time is better)\nNumbers has been placed at the point when each size 1 quantum fuel tank runs out of fuel, i.e. that tanks/ships maximum range with the specific quantum drive (see legend)\nData has been extracted directly from the 3.19.1 game files via "scdatatools" (https://gitlab.com/scmodding/frameworks/scdatatools).\nCalculations are based on the paper "A study on travel time and the underlying physical model of Quantum Drives in Star Citizen" by @Erec (https://gitlab.com/Erecco/a-study-on-quantum-travel-time).',
+)
+create_fig(
+    [
+        q
+        for q in qdrives
+        if sc_key(q, "SAttachableComponentParams")["AttachDef"]["Size"] == 1
+    ],
+    f"Size 1 quantum drives",
+    "results/res1_alt",
 )
 create_fig(
     [
