@@ -1,12 +1,13 @@
 import json
 import random
 from datetime import timedelta
-from math import acos, cos, cosh, log, sqrt
 
 import matplotlib.pyplot as plt
 import numpy
+import loguru
 from matplotlib import ticker
 from matplotlib.patches import FancyBboxPatch
+import utils
 
 # Shades of gray
 GREY10 = "#1a1a1a"
@@ -19,26 +20,24 @@ GREY91 = "#e8e8e8"
 GREY98 = "#fafafa"
 
 DISTANCES = [
-    ("ARC<->CRU", 42_307_000_000),
-    ("CRU<->HUR", 32_916_000_000),
-    ("CRU<->MIC", 57_481_000_000),
-    ("ARC<->HUR", 22_882_000_000),
-    ("HUR<->MIC", 38_407_000_000),
-    ("ARC<->MIC", 59_464_000_000),
+    ("ARC <> CRU", 42_307_000_000),
+    ("CRU <> HUR", 32_916_000_000),
+    ("CRU <> MIC", 57_481_000_000),
+    ("ARC <> HUR", 22_882_000_000),
+    ("HUR <> MIC", 38_407_000_000),
+    ("ARC <> MIC", 59_464_000_000),
     (
-        "Earth<->Mars (Min)",
+        "Earth <> Mars (Min)",
         54_600_000_000,
     ),  # For refence and fun - Stanton is really small 😅
+    # ("Salvage (and back)", 90_000_000_000),
 ]
 
 BEST_IN_SHOW = ["xl1", "voyage", "vk00", "ts2", "atlas", "spectre"]
 
-with open("qdrives.json") as f:
-    qdrives = json.load(f)
-
 STEP = 10_000_000
 X_MIN = 0
-X_MAX = 70_000_000_000
+X_MAX = 60_000_000_000
 
 COLORS = [
     "#e6194b",
@@ -64,45 +63,52 @@ COLORS = [
     "#404040",
     "#000000",
 ]
+S1_QTNK_OVERRIDES = [(700, "125a"), (1960, "Cutter")]
+
+QDRIVE_SIZES = json.load(open("qdrive_sizes.json"))
+
+
+attachable_components = json.load(open("dump.json"))
+QDRIVES = [v for k, v in attachable_components.items() if k.startswith("QDRV_")]
+TANK_SIZES = {}
+for k, v in attachable_components.items():
+    if k.startswith("QTNK_"):
+        ship_name = k.split("_", 2)[-1].replace("_", " ")
+        capacity = round(utils.sc_key(v, "SCItemFuelTankParams")["capacity"])
+
+        if ship_name == "Default":
+            continue
+
+        if not (
+            size := next(
+                (size for size, name in QDRIVE_SIZES if name in ship_name.lower()),
+                None,
+            )
+        ):
+            loguru.logger.error(f'"{ship_name}" not in QDRIVE_SIZES!')
+            exit()
+        if any(n for _, n in S1_QTNK_OVERRIDES if n.lower() == ship_name.lower()):
+            loguru.logger.info(f'"{ship_name}" in overrides, skipping game file')
+            continue
+
+        if size not in TANK_SIZES:
+            TANK_SIZES[size] = {}
+
+        if capacity not in TANK_SIZES[size]:
+            TANK_SIZES[size][capacity] = []
+
+        if capacity == 583:
+            ship_name = "Most S1 ships"
+        TANK_SIZES[size][capacity].append(ship_name)
+        TANK_SIZES[size][capacity] = list(set(TANK_SIZES[size][capacity]))
+
+for capacity, ship_name in S1_QTNK_OVERRIDES:
+    if capacity not in TANK_SIZES[size]:
+        TANK_SIZES[size][capacity] = []
+    TANK_SIZES[size][capacity].append(ship_name)
+    TANK_SIZES[size][capacity] = list(set(TANK_SIZES[size][capacity]))
 
 x = list(range(X_MIN, X_MAX, STEP))
-
-
-# Here be dragons - read https://gitlab.com/Erecco/a-study-on-quantum-travel-time to understand
-def calc_z(v_max, a_1, a_2, d_tot):
-    return (3 * (a_2 - a_1) ** 2 * (a_1 + a_2) ** 2 * d_tot) / (
-        8 * a_1**3 * v_max**2
-    ) - 1
-
-
-def calc_d_c(v_max, a_1, a_2, d_tot):
-    return d_tot - (4 * v_max**2 * (2 * a_1 + a_2)) / (3 * (a_1 + a_2) ** 2)
-
-
-def calc_t_tot(v_max, a_1, a_2, d_tot, k):
-    if calc_d_c(v_max, a_1, a_2, d_tot) < 0:
-        z = calc_z(v_max, a_1, a_2, d_tot)
-        if z > 1:
-            return ((4 * a_1 * v_max) / (a_2**2 - a_1**2)) * (
-                2 * cosh(1 / 3 * log(z - sqrt(z**2 - 1))) - 1
-            ) + k
-        acos_arg = (3 * (a_2 - a_1) ** 2 * (a_1 + a_2) ** 2 * d_tot) / (
-            8 * a_1**3 * v_max**2
-        ) - 1
-        return (4 * a_1 * v_max) / (a_2**2 - a_1**2) * (
-            2 * cos((1 / 3) * acos(acos_arg)) - 1
-        ) + k
-    else:
-        return (
-            (4 * v_max) / (a_1 + a_2)
-            + d_tot / v_max
-            - (4 * v_max * (2 * a_1 + a_2)) / (3 * (a_1 + a_2) ** 2)
-            + k
-        )
-
-
-def sc_key(obj, key, second_key="Components"):
-    return next(c for c in obj[second_key] if key in c.keys())[key]
 
 
 def create_fig(
@@ -111,7 +117,7 @@ def create_fig(
     file_name,
     tank_sizes=[],
     show_size=False,
-    subtitle='Travel time (including spool up time) for any realistic distance in Stanton given each quantum drive (Remeber: Lower time is better)\nData has been extracted directly from the 3.19.1 game files via "scdatatools" (https://gitlab.com/scmodding/frameworks/scdatatools).\nCalculations are based on the paper "A study on travel time and the underlying physical model of Quantum Drives in Star Citizen" by @Erec (https://gitlab.com/Erecco/a-study-on-quantum-travel-time).',
+    subtitle='Travel time (including spool up time) for any realistic distance in Stanton given each quantum drive (Remeber: Lower time is better)\nData has been extracted directly from the 3.21.0 game files via "scdatatools" (https://gitlab.com/scmodding/frameworks/scdatatools).\nCalculations are based on the paper "A study on travel time and the underlying physical model of Quantum Drives in Star Citizen" by @Erec (https://gitlab.com/Erecco/a-study-on-quantum-travel-time).',
 ):
     # Initialize layout ----------------------------------------------
     fig, ax = plt.subplots(figsize=(22, 11))
@@ -124,37 +130,30 @@ def create_fig(
 
     qdrives = sorted(
         qdrives,
-        key=lambda q: calc_t_tot(
-            sc_key(q, "SCItemQuantumDriveParams")["params"]["driveSpeed"],
-            sc_key(q, "SCItemQuantumDriveParams")["params"]["stageOneAccelRate"],
-            sc_key(q, "SCItemQuantumDriveParams")["params"]["stageTwoAccelRate"],
+        key=lambda q: utils.calc_t_tot(
+            utils.sc_key(q, "SCItemQuantumDriveParams")["params"]["driveSpeed"],
+            utils.sc_key(q, "SCItemQuantumDriveParams")["params"]["stageOneAccelRate"],
+            utils.sc_key(q, "SCItemQuantumDriveParams")["params"]["stageTwoAccelRate"],
             x[-1],
-            sc_key(q, "SCItemQuantumDriveParams")["params"]["spoolUpTime"],
+            utils.sc_key(q, "SCItemQuantumDriveParams")["params"]["spoolUpTime"],
         ),
     )
     LABELS = sorted(
         [
             (
-                sc_key(q, "SAttachableComponentParams")["AttachDef"]["Localization"][
-                    "Name"
-                ]
-                .replace("_SCItem", "")
-                .rsplit("_", 1)[-1]
-                + (
-                    f'({sc_key(q,"SAttachableComponentParams")["AttachDef"]["Size"]})'
-                    if show_size
-                    else ""
-                ),
-                calc_t_tot(
-                    sc_key(q, "SCItemQuantumDriveParams")["params"]["driveSpeed"],
-                    sc_key(q, "SCItemQuantumDriveParams")["params"][
+                utils.get_name(q, show_size),
+                utils.calc_t_tot(
+                    utils.sc_key(q, "SCItemQuantumDriveParams")["params"]["driveSpeed"],
+                    utils.sc_key(q, "SCItemQuantumDriveParams")["params"][
                         "stageOneAccelRate"
                     ],
-                    sc_key(q, "SCItemQuantumDriveParams")["params"][
+                    utils.sc_key(q, "SCItemQuantumDriveParams")["params"][
                         "stageTwoAccelRate"
                     ],
                     x[-1],
-                    sc_key(q, "SCItemQuantumDriveParams")["params"]["spoolUpTime"],
+                    utils.sc_key(q, "SCItemQuantumDriveParams")["params"][
+                        "spoolUpTime"
+                    ],
                 ),
             )
             for q in qdrives
@@ -169,7 +168,7 @@ def create_fig(
         (h, t, LOWEST_MAX_Y + i * ((MAX_Y - LOWEST_MAX_Y) / (len(LABELS) - 1)))
         for i, (h, t) in enumerate(LABELS)
     ]
-    print(len(LABELS))
+    loguru.logger.debug(len(LABELS))
 
     PAD = (X_MAX - X_MIN) * 0.05
 
@@ -230,10 +229,10 @@ def create_fig(
         )
 
     for i, qdrive in enumerate(qdrives):
-        params = sc_key(qdrive, "SCItemQuantumDriveParams")["params"]
+        params = utils.sc_key(qdrive, "SCItemQuantumDriveParams")["params"]
 
         y = [
-            calc_t_tot(
+            utils.calc_t_tot(
                 params["driveSpeed"],
                 params["stageOneAccelRate"],
                 params["stageTwoAccelRate"],
@@ -243,15 +242,15 @@ def create_fig(
             for d_tot in x
         ]
 
-        ax.plot(x, y, color=COLORS[i])
+        ax.plot(x, y, linewidth=0.8, color=COLORS[i])
 
-        fuel_requirement = sc_key(qdrive, "SCItemQuantumDriveParams")[
+        fuel_requirement = utils.sc_key(qdrive, "SCItemQuantumDriveParams")[
             "quantumFuelRequirement"
         ]
         for ii, (size, _) in enumerate(tank_sizes):
             max_range = size / fuel_requirement * 1_000_000
             tank_x = min(X_MAX, max_range)
-            tank_y = calc_t_tot(
+            tank_y = utils.calc_t_tot(
                 params["driveSpeed"],
                 params["stageOneAccelRate"],
                 params["stageTwoAccelRate"],
@@ -264,7 +263,7 @@ def create_fig(
                 str(ii),
                 color=COLORS[i],
                 backgroundcolor=GREY98,
-                fontsize=9,
+                fontsize=5,
                 multialignment="center",
                 verticalalignment="center",
                 bbox=dict(facecolor=GREY98, edgecolor=GREY98, pad=0.0),
@@ -307,33 +306,19 @@ def create_fig(
 create_fig(
     [
         q
-        for q in qdrives
-        if sc_key(q, "SAttachableComponentParams")["AttachDef"]["Size"] == 1
+        for q in QDRIVES
+        if utils.sc_key(q, "SAttachableComponentParams")["AttachDef"]["Size"] == 1
     ],
     f"Size 1 quantum drives - including maximum ranges",
     "results/res1",
-    tank_sizes=[
-        (583.3300170898438, "Most S1 ships"),
-        (625.0, "85X"),
-        (645.0, "All Pisces"),
-        (680.0, "300i"),
-        (700.0, "Aurora LX, 100i, Mustang Beta"),
-        (770.75, "Nomad"),
-        (800.0, "Scorpius Antares"),
-        (830.0, "315p"),
-        (950.0, "Terrapin"),
-        (1000.0, "Mantis"),
-        (2750.0, "Defender"),
-        (3000.0, "Cutter"),
-        (10000.0, "Hull A"),
-    ],
-    subtitle='Travel time (including spool up time) for any realistic distance in Stanton given each quantum drive (Remeber: Lower time is better)\nNumbers has been placed at the point when each size 1 quantum fuel tank runs out of fuel, i.e. that tanks/ships maximum range with the specific quantum drive (see legend)\nData has been extracted directly from the 3.19.1 game files via "scdatatools" (https://gitlab.com/scmodding/frameworks/scdatatools).\nCalculations are based on the paper "A study on travel time and the underlying physical model of Quantum Drives in Star Citizen" by @Erec (https://gitlab.com/Erecco/a-study-on-quantum-travel-time).',
+    tank_sizes=sorted([(k, ", ".join(v)) for k, v in TANK_SIZES[1].items()]),
+    subtitle='Travel time (including spool up time) for any realistic distance in Stanton given each quantum drive (Remeber: Lower time is better)\nNumbers has been placed at the point when each size 1 quantum fuel tank runs out of fuel, i.e. that tanks/ships maximum range with the specific quantum drive (see legend)\nData has been extracted directly from the 3.21.0 game files via "scdatatools" (https://gitlab.com/scmodding/frameworks/scdatatools).\nCalculations are based on the paper "A study on travel time and the underlying physical model of Quantum Drives in Star Citizen" by @Erec (https://gitlab.com/Erecco/a-study-on-quantum-travel-time).',
 )
 create_fig(
     [
         q
-        for q in qdrives
-        if sc_key(q, "SAttachableComponentParams")["AttachDef"]["Size"] == 1
+        for q in QDRIVES
+        if utils.sc_key(q, "SAttachableComponentParams")["AttachDef"]["Size"] == 1
     ],
     f"Size 1 quantum drives",
     "results/res1_alt",
@@ -341,8 +326,8 @@ create_fig(
 create_fig(
     [
         q
-        for q in qdrives
-        if sc_key(q, "SAttachableComponentParams")["AttachDef"]["Size"] == 2
+        for q in QDRIVES
+        if utils.sc_key(q, "SAttachableComponentParams")["AttachDef"]["Size"] == 2
     ],
     f"Size 2 quantum drives",
     "results/res2",
@@ -350,8 +335,8 @@ create_fig(
 create_fig(
     [
         q
-        for q in qdrives
-        if sc_key(q, "SAttachableComponentParams")["AttachDef"]["Size"] == 3
+        for q in QDRIVES
+        if utils.sc_key(q, "SAttachableComponentParams")["AttachDef"]["Size"] == 3
     ],
     f"Size 3 quantum drives",
     "results/res3",
@@ -359,14 +344,14 @@ create_fig(
 create_fig(
     [
         q
-        for q in qdrives
+        for q in QDRIVES
         if any(
             [
                 n
                 for n in BEST_IN_SHOW
-                if sc_key(q, "SAttachableComponentParams")["AttachDef"]["Localization"][
-                    "Name"
-                ]
+                if utils.sc_key(q, "SAttachableComponentParams")["AttachDef"][
+                    "Localization"
+                ]["Name"]
                 .replace("_SCItem", "")
                 .rsplit("_", 1)[-1]
                 .lower()
